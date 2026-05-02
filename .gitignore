@@ -1,2 +1,4 @@
-hidapi.dll
+python/hidapi.dll
 .env
+python/.venv/
+__pycache__/
