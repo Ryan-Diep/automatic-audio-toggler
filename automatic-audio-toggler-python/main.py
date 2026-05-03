@@ -1,44 +1,62 @@
 import hid
 import time
 import subprocess
+import json
 import os
-from dotenv import load_dotenv
+import sys
 
-load_dotenv()
-VENDOR_ID = int(os.getenv("VENDOR_ID"), 16)
-PRODUCT_ID = int(os.getenv("PRODUCT_ID"), 16)
+CONFIG_TEMPLATE = {
+    "vendor_id": "0x1234",
+    "product_id": "0x5678",
+    "speaker_name": "Your Speaker Name Here",
+    "headset_name": "Your Headset Name Here",
+    "nircmd_path": "C:\\path\\to\\nircmd.exe"
+}
 
-NIRCMD_PATH = os.getenv("NIRCMD_PATH")
-HEADSET_NAME = os.getenv("HEADSET_NAME")
-SPEAKER_NAME = os.getenv("SPEAKER_NAME")
+def load_config():
+    config_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "config.json")
 
-def switch_audio(device_name):
-    print(f"\n[>>>] Switching audio to: {device_name}")
-    subprocess.run([NIRCMD_PATH, "setdefaultsounddevice", device_name, "1"], shell=True)
-    subprocess.run([NIRCMD_PATH, "setdefaultsounddevice", device_name, "2"], shell=True)
+    if not os.path.exists(config_path):
+        with open(config_path, "w") as f:
+            json.dump(CONFIG_TEMPLATE, f, indent=2)
+        sys.exit(0)
+
+    with open(config_path, "r") as f:
+        cfg = json.load(f)
+
+    if cfg.get("headset_name") == "Your Headset Name Here" or cfg.get("speaker_name") == "Your Speaker Name Here":
+        sys.exit(0)
+
+    return {
+        "vendor_id": int(cfg["vendor_id"], 16) if isinstance(cfg["vendor_id"], str) else cfg["vendor_id"],
+        "product_id": int(cfg["product_id"], 16) if isinstance(cfg["product_id"], str) else cfg["product_id"],
+        "nircmd_path": cfg["nircmd_path"],
+        "headset_name": cfg["headset_name"],
+        "speaker_name": cfg["speaker_name"]
+    }
+
+def switch_audio(nircmd_path, device_name):
+    subprocess.run([nircmd_path, "setdefaultsounddevice", device_name, "1"], shell=True)
+    subprocess.run([nircmd_path, "setdefaultsounddevice", device_name, "2"], shell=True)
 
 def main():
-    print("Initializing Auto-Toggler...")
-    
+    cfg = load_config()
+
     target_path = None
-    
-    for device_info in hid.enumerate(VENDOR_ID, PRODUCT_ID):
+    for device_info in hid.enumerate(cfg["vendor_id"], cfg["product_id"]):
         if device_info['usage_page'] == 65300:
             target_path = device_info['path']
             break
-            
+
     if not target_path:
-        print("[-] Could not find the telemetry channel.")
-        return
+        sys.exit(0)
 
     try:
         hid_device = hid.device()
         hid_device.open_path(target_path)
-        hid_device.set_nonblocking(1) 
-        print("[+] Connected! Listening for Power events...")
-    except Exception as e:
-        print(f"[-] Connection failed: {e}")
-        return
+        hid_device.set_nonblocking(1)
+    except Exception:
+        sys.exit(0)
 
     current_state = "unknown"
 
@@ -48,19 +66,14 @@ def main():
             if data and len(data) >= 14:
                 if data[10] == 0x20:
                     if data[13] == 0x1 and current_state != "on":
-                        print("[+] Power ON detected!")
                         current_state = "on"
-                        switch_audio(HEADSET_NAME)
-                        
+                        switch_audio(cfg["nircmd_path"], cfg["headset_name"])
                     elif data[13] == 0x0 and current_state != "off":
-                        print("[-] Power OFF detected!")
                         current_state = "off"
-                        switch_audio(SPEAKER_NAME)
-
+                        switch_audio(cfg["nircmd_path"], cfg["speaker_name"])
             time.sleep(0.05)
-
     except KeyboardInterrupt:
-        print("\nExiting script...")
+        pass
     finally:
         hid_device.close()
 
