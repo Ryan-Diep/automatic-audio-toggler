@@ -96,7 +96,7 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	configPath := filepath.Join(filepath.Dir(exePath), "config.json")
+	configPath := filepath.Join(filepath.Dir(exePath), "audio-toggler-go.json")
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		templateJSON := []byte(`{

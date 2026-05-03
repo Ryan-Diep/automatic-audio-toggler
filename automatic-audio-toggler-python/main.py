@@ -14,7 +14,7 @@ CONFIG_TEMPLATE = {
 }
 
 def load_config():
-    config_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "config.json")
+    config_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "audio-toggler-python.json")
 
     if not os.path.exists(config_path):
         with open(config_path, "w") as f:
