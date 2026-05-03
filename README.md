@@ -45,9 +45,9 @@ You will need to edit this `config.json` file to match your system's specifics.
 1. Open the classic Windows **Sound Control Panel**. (Press `Win + R`, type `mmsys.cpl`, and hit Enter).
 2. Look at the **Playback** tab.
 3. Identify the exact names of your devices as they appear in bold text (e.g., "Speakers" or "Headset Earphone").
-4. Enter these **exact names** into the `config.json` file for the `headset_name` and `speaker_name` fields.
+4. Enter these **exact names** into the `audio-toggler-go.json` or `audio-toggler-python.json` file for the `headset_name` and `speaker_name` fields.
 
-#### Example `config.json` file
+#### Example `audio-toggler-python.json` file
 ```json
 {
   "vendor_id": "0xYOUR_VID_HERE",
