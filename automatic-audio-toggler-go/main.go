@@ -1,9 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -11,13 +12,11 @@ import (
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
-	"github.com/joho/godotenv"
 	"github.com/moutend/go-wca/pkg/wca"
 	"github.com/sstallion/go-hid"
 	"golang.org/x/sys/windows"
 )
 
-// IPolicyConfig COM interface (undocumented Windows API)
 var (
 	IID_IPolicyConfig  = ole.NewGUID("{f8679f50-850a-41cf-9c72-430f290290c8}")
 	CLSID_PolicyConfig = ole.NewGUID("{870af99c-171d-4f9e-af0d-e63df40c2bc9}")
@@ -64,33 +63,67 @@ func (pc *IPolicyConfig) SetDefaultEndpoint(deviceID string, role wca.ERole) err
 	return nil
 }
 
-type Config struct {
-	VendorID    uint16
-	ProductID   uint16
-	SpeakerName string
-	HeadsetName string
+type HexUint16 uint16
+
+func (h *HexUint16) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		val, err := strconv.ParseUint(strings.TrimPrefix(s, "0x"), 16, 16)
+		if err != nil {
+			return fmt.Errorf("invalid hex value: %s", s)
+		}
+		*h = HexUint16(val)
+		return nil
+	}
+
+	var n uint16
+	if err := json.Unmarshal(data, &n); err != nil {
+		return err
+	}
+	*h = HexUint16(n)
+	return nil
 }
 
-func loadConfig() Config {
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Fatal("Error loading .env file")
+type Config struct {
+	VendorID    HexUint16 `json:"vendor_id"`
+	ProductID   HexUint16 `json:"product_id"`
+	SpeakerName string    `json:"speaker_name"`
+	HeadsetName string    `json:"headset_name"`
+}
+
+func loadConfig() (Config, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return Config{}, err
+	}
+	configPath := filepath.Join(filepath.Dir(exePath), "config.json")
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		templateJSON := []byte(`{
+  "vendor_id": "0x1234",
+  "product_id": "0x5678",
+  "speaker_name": "Your Speaker Name Here",
+  "headset_name": "Your Headset Name Here"
+}`)
+		os.WriteFile(configPath, templateJSON, 0644)
+		return Config{}, fmt.Errorf("config not set up")
 	}
 
-	vendorID, err := strconv.ParseUint(os.Getenv("VENDOR_ID"), 0, 16)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		log.Fatalf("Invalid VENDOR_ID: %v", err)
-	}
-	productID, err := strconv.ParseUint(os.Getenv("PRODUCT_ID"), 0, 16)
-	if err != nil {
-		log.Fatalf("Invalid PRODUCT_ID: %v", err)
+		return Config{}, err
 	}
 
-	return Config{
-		VendorID:    uint16(vendorID),
-		ProductID:   uint16(productID),
-		SpeakerName: os.Getenv("SPEAKER_NAME"),
-		HeadsetName: os.Getenv("HEADSET_NAME"),
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, err
 	}
+
+	if cfg.HeadsetName == "Your Headset Name Here" || cfg.SpeakerName == "Your Speaker Name Here" {
+		return Config{}, fmt.Errorf("config not set up")
+	}
+
+	return cfg, nil
 }
 
 func findDevicePath(vendorID, productID uint16) (string, error) {
@@ -110,11 +143,18 @@ func findDevicePath(vendorID, productID uint16) (string, error) {
 	return targetPath, nil
 }
 
-func setDefaultAudioDevice(deviceName string) error {
+func comInit() error {
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
 		if oleErr, ok := err.(*ole.OleError); !ok || oleErr.Code() != 0x00000001 {
 			return fmt.Errorf("COM init failed: %w", err)
 		}
+	}
+	return nil
+}
+
+func setDefaultAudioDevice(deviceName string) error {
+	if err := comInit(); err != nil {
+		return err
 	}
 	defer ole.CoUninitialize()
 
@@ -168,7 +208,6 @@ func setDefaultAudioDevice(deviceName string) error {
 			if err := setDefaultDevice(id); err != nil {
 				return fmt.Errorf("failed to set default device: %w", err)
 			}
-			fmt.Printf("[>>>] Default audio device set to: %s\n", name)
 			return nil
 		}
 	}
@@ -199,32 +238,31 @@ func setDefaultDevice(deviceID string) error {
 }
 
 func main() {
-	cfg := loadConfig()
-
-	path, err := findDevicePath(cfg.VendorID, cfg.ProductID)
+	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("[-] %v", err)
+		os.Exit(0)
+	}
+
+	path, err := findDevicePath(uint16(cfg.VendorID), uint16(cfg.ProductID))
+	if err != nil {
+		os.Exit(0)
 	}
 
 	dev, err := hid.OpenPath(path)
 	if err != nil {
-		log.Fatalf("Failed to open device: %v", err)
+		os.Exit(0)
 	}
 	defer dev.Close()
 
 	if err := dev.SetNonblock(true); err != nil {
-		log.Fatalf("Failed to set non-blocking mode: %v", err)
+		os.Exit(0)
 	}
-
-	fmt.Println("[+] Connected! Listening for power events...")
 
 	stateChange := make(chan string, 1)
 
 	go func() {
 		for deviceName := range stateChange {
-			if err := setDefaultAudioDevice(deviceName); err != nil {
-				log.Printf("[!] Audio switch failed: %v", err)
-			}
+			setDefaultAudioDevice(deviceName)
 		}
 	}()
 
@@ -241,7 +279,6 @@ func main() {
 		if n > 0 && len(buf) >= 14 && buf[10] == 0x20 {
 			switch {
 			case buf[13] == 0x1 && currentState != "on":
-				fmt.Println("[+] Power ON detected!")
 				currentState = "on"
 				select {
 				case <-stateChange:
@@ -250,7 +287,6 @@ func main() {
 				stateChange <- cfg.HeadsetName
 
 			case buf[13] == 0x0 && currentState != "off":
-				fmt.Println("[-] Power OFF detected!")
 				currentState = "off"
 				select {
 				case <-stateChange:
