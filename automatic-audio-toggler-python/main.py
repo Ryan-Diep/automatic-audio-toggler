@@ -18,23 +18,23 @@ def switch_audio(device_name):
     subprocess.run([NIRCMD_PATH, "setdefaultsounddevice", device_name, "2"], shell=True)
 
 def main():
-    print("Initializing Razer Auto-Toggler...")
+    print("Initializing Auto-Toggler...")
     
     target_path = None
     
-    for d_info in hid.enumerate(VENDOR_ID, PRODUCT_ID):
-        if d_info['usage_page'] == 65300:
-            target_path = d_info['path']
+    for device_info in hid.enumerate(VENDOR_ID, PRODUCT_ID):
+        if device_info['usage_page'] == 65300:
+            target_path = device_info['path']
             break
             
     if not target_path:
-        print("[-] Could not find the Razer telemetry channel.")
+        print("[-] Could not find the telemetry channel.")
         return
 
     try:
-        h = hid.device()
-        h.open_path(target_path)
-        h.set_nonblocking(1) 
+        hid_device = hid.device()
+        hid_device.open_path(target_path)
+        hid_device.set_nonblocking(1) 
         print("[+] Connected! Listening for Power events...")
     except Exception as e:
         print(f"[-] Connection failed: {e}")
@@ -44,7 +44,7 @@ def main():
 
     try:
         while True:
-            data = h.read(64)
+            data = hid_device.read(64)
             if data and len(data) >= 14:
                 if data[10] == 0x20:
                     if data[13] == 0x1 and current_state != "on":
@@ -62,7 +62,7 @@ def main():
     except KeyboardInterrupt:
         print("\nExiting script...")
     finally:
-        h.close()
+        hid_device.close()
 
 if __name__ == "__main__":
     main()
