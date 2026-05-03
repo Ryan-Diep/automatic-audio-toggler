@@ -3,5 +3,5 @@ python/.venv/
 __pycache__/
 automatic-audio-toggler-go/audio-toggler-go.json
 automatic-audio-toggler-python/audio-toggler-python.json
-automatic-audio-toggler-go/automatic-audio-toggler-go.exe
-automatic-audio-toggler-python/automatic-audio-toggler-python.exe
+automatic-audio-toggler-go/audio-toggler-go.exe
+automatic-audio-toggler-python/audio-toggler-python.exe
