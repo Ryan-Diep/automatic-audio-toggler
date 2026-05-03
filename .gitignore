@@ -1,5 +1,5 @@
 python/hidapi.dll
-python/.venv/
+automatic-audio-toggler-python/.venv/
 __pycache__/
 automatic-audio-toggler-go/audio-toggler-go.json
 automatic-audio-toggler-python/audio-toggler-python.json

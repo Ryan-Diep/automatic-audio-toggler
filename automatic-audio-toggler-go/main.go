@@ -152,6 +152,48 @@ func comInit() error {
 	return nil
 }
 
+func correctStartupState(cfg Config) error {
+	if err := comInit(); err != nil {
+		return err
+	}
+	defer ole.CoUninitialize()
+
+	var enumerator *wca.IMMDeviceEnumerator
+	if err := wca.CoCreateInstance(
+		wca.CLSID_MMDeviceEnumerator,
+		0,
+		wca.CLSCTX_ALL,
+		wca.IID_IMMDeviceEnumerator,
+		&enumerator,
+	); err != nil {
+		return err
+	}
+	defer enumerator.Release()
+
+	var device *wca.IMMDevice
+	if err := enumerator.GetDefaultAudioEndpoint(wca.ERender, wca.EConsole, &device); err != nil {
+		return err
+	}
+	defer device.Release()
+
+	var ps *wca.IPropertyStore
+	if err := device.OpenPropertyStore(wca.STGM_READ, &ps); err != nil {
+		return err
+	}
+	defer ps.Release()
+
+	var pv wca.PROPVARIANT
+	if err := ps.GetValue(&wca.PKEY_Device_FriendlyName, &pv); err != nil {
+		return err
+	}
+
+	if strings.Contains(pv.String(), cfg.HeadsetName) {
+		return setDefaultAudioDevice(cfg.SpeakerName)
+	}
+
+	return nil
+}
+
 func setDefaultAudioDevice(deviceName string) error {
 	if err := comInit(); err != nil {
 		return err
@@ -242,6 +284,8 @@ func main() {
 	if err != nil {
 		os.Exit(0)
 	}
+
+	correctStartupState(cfg)
 
 	path, err := findDevicePath(uint16(cfg.VendorID), uint16(cfg.ProductID))
 	if err != nil {

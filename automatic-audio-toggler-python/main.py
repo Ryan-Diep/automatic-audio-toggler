@@ -4,6 +4,12 @@ import subprocess
 import json
 import os
 import sys
+import ctypes
+from ctypes import POINTER, byref
+from comtypes import CLSCTX_ALL
+from comtypes.client import CreateObject
+from pycaw.pycaw import AudioUtilities, IMMDeviceEnumerator, EDataFlow, ERole
+from pycaw.constants import CLSID_MMDeviceEnumerator
 
 CONFIG_TEMPLATE = {
     "vendor_id": "0x1234",
@@ -35,12 +41,33 @@ def load_config():
         "speaker_name": cfg["speaker_name"]
     }
 
+def get_default_device_name():
+    try:
+        device = AudioUtilities.GetSpeakers()
+        if device is None:
+            return None
+        props = device.OpenPropertyStore(0)
+        name = props.GetValue("{a45c254e-df1c-4efd-8020-67d146a850e0}", 14).value
+        return name
+    except Exception:
+        return None
+
 def switch_audio(nircmd_path, device_name):
     subprocess.run([nircmd_path, "setdefaultsounddevice", device_name, "1"], shell=True)
     subprocess.run([nircmd_path, "setdefaultsounddevice", device_name, "2"], shell=True)
 
+def correct_startup_state(cfg):
+    try:
+        current = get_default_device_name()
+        if current and cfg["headset_name"].lower() in current.lower():
+            switch_audio(cfg["nircmd_path"], cfg["speaker_name"])
+    except Exception:
+        pass
+
 def main():
     cfg = load_config()
+
+    correct_startup_state(cfg)
 
     target_path = None
     for device_info in hid.enumerate(cfg["vendor_id"], cfg["product_id"]):
