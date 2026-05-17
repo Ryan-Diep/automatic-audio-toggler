@@ -312,8 +312,16 @@ func main() {
 
 	buf := make([]byte, 64)
 	currentState := "unknown"
+	lastTick := time.Now()
 
 	for {
+		now := time.Now()
+		if now.Sub(lastTick) > 3*time.Second {
+			correctStartupState(cfg)
+			currentState = "unknown"
+		}
+		lastTick = now
+
 		n, err := dev.Read(buf)
 		if err != nil {
 			time.Sleep(50 * time.Millisecond)

@@ -86,9 +86,16 @@ def main():
         sys.exit(0)
 
     current_state = "unknown"
+    last_tick = time.monotonic()
 
     try:
         while True:
+            now = time.monotonic()
+            if now - last_tick > 3:
+                correct_startup_state(cfg)
+                current_state = "unknown"
+            last_tick = now
+
             data = hid_device.read(64)
             if data and len(data) >= 14:
                 if data[10] == 0x20:
