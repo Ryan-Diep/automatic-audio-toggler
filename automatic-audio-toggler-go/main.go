@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -152,7 +153,40 @@ func comInit() error {
 	return nil
 }
 
+func monitorLink(dev statusDevice, cfg Config) {
+	var previousConnection bool
+	haveBaseline := false
+	var sequence byte
+	for {
+		started := time.Now()
+		connected, err := queryLink(dev, sequence)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Headset status query failed: %v\n", err)
+		} else {
+			previous := previousConnection
+			previousConnection = connected
+			if !connected {
+				err = correctStartupState(cfg)
+			} else if haveBaseline && !previous {
+				err = setDefaultAudioDevice(cfg.HeadsetName)
+			} else if !haveBaseline {
+				err = switchAudioIfSelected(cfg.SpeakerName, cfg.HeadsetName)
+			}
+			haveBaseline = true
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Audio switch failed: %v\n", err)
+			}
+		}
+		sequence = (sequence + 1) & 0x1f
+		time.Sleep(linkPollInterval - time.Since(started))
+	}
+}
+
 func correctStartupState(cfg Config) error {
+	return switchAudioIfSelected(cfg.HeadsetName, cfg.SpeakerName)
+}
+
+func switchAudioIfSelected(selectedName, targetName string) error {
 	if err := comInit(); err != nil {
 		return err
 	}
@@ -171,7 +205,7 @@ func correctStartupState(cfg Config) error {
 	defer enumerator.Release()
 
 	var device *wca.IMMDevice
-	if err := enumerator.GetDefaultAudioEndpoint(wca.ERender, wca.EConsole, &device); err != nil {
+	if err := enumerator.GetDefaultAudioEndpoint(wca.ERender, wca.EMultimedia, &device); err != nil {
 		return err
 	}
 	defer device.Release()
@@ -187,8 +221,8 @@ func correctStartupState(cfg Config) error {
 		return err
 	}
 
-	if strings.Contains(pv.String(), cfg.HeadsetName) {
-		return setDefaultAudioDevice(cfg.SpeakerName)
+	if strings.Contains(strings.ToLower(pv.String()), strings.ToLower(selectedName)) {
+		return setDefaultAudioDevice(targetName)
 	}
 
 	return nil
@@ -273,6 +307,9 @@ func setDefaultDevice(deviceID string) error {
 	if err := pc.SetDefaultEndpoint(deviceID, wca.EConsole); err != nil {
 		return fmt.Errorf("failed to set console default: %w", err)
 	}
+	if err := pc.SetDefaultEndpoint(deviceID, wca.EMultimedia); err != nil {
+		return fmt.Errorf("failed to set multimedia default: %w", err)
+	}
 	if err := pc.SetDefaultEndpoint(deviceID, wca.ECommunications); err != nil {
 		return fmt.Errorf("failed to set comms default: %w", err)
 	}
@@ -280,12 +317,18 @@ func setDefaultDevice(deviceID string) error {
 }
 
 func main() {
+	// COM initialization, calls, and cleanup must stay on the same OS thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	cfg, err := loadConfig()
 	if err != nil {
 		os.Exit(0)
 	}
 
-	correctStartupState(cfg)
+	polling := supportsLinkQuery(uint16(cfg.VendorID), uint16(cfg.ProductID))
+	if !polling {
+		correctStartupState(cfg)
+	}
 
 	path, err := findDevicePath(uint16(cfg.VendorID), uint16(cfg.ProductID))
 	if err != nil {
@@ -301,10 +344,16 @@ func main() {
 	if err := dev.SetNonblock(true); err != nil {
 		os.Exit(0)
 	}
+	if polling {
+		monitorLink(dev, cfg)
+		return
+	}
 
 	stateChange := make(chan string, 1)
 
 	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 		for deviceName := range stateChange {
 			setDefaultAudioDevice(deviceName)
 		}
@@ -328,7 +377,7 @@ func main() {
 			continue
 		}
 
-		if n > 0 && len(buf) >= 14 && buf[10] == 0x20 {
+		if n >= 14 && buf[10] == 0x20 {
 			switch {
 			case buf[13] == 0x1 && currentState != "on":
 				currentState = "on"
