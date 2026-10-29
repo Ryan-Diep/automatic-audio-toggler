@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sstallion/go-hid"
 )
 
 // Protocol: https://github.com/bbesli/Synapse-for-Linux/blob/main/docs/PROTOCOL.md
@@ -11,8 +14,8 @@ func supportsLinkQuery(vendorID, productID uint16) bool {
 	return vendorID == 0x1532 && productID == 0x0565
 }
 
-const linkPollInterval = 2 * time.Second
-const linkReplyTimeout = time.Second
+const linkPollInterval = 250 * time.Millisecond
+const linkReplyTimeout = 150 * time.Millisecond
 
 func linkRequest(sequence byte) []byte {
 	report := make([]byte, 64)
@@ -48,7 +51,7 @@ func parseLinkReply(data []byte, sequence byte) (bool, bool) {
 
 type statusDevice interface {
 	Write([]byte) (int, error)
-	Read([]byte) (int, error)
+	ReadWithTimeout([]byte, time.Duration) (int, error)
 }
 
 func queryLink(device statusDevice, sequence byte) (bool, error) {
@@ -62,16 +65,20 @@ func queryLink(device statusDevice, sequence byte) (bool, error) {
 	}
 	deadline := time.Now().Add(linkReplyTimeout)
 	buf := make([]byte, 64)
-	for time.Now().Before(deadline) {
-		n, err := device.Read(buf)
+	for remaining := time.Until(deadline); remaining > 0; remaining = time.Until(deadline) {
+		// HIDAPI truncates to milliseconds; round up to avoid a zero-timeout spin.
+		timeout := (remaining + time.Millisecond - 1) / time.Millisecond * time.Millisecond
+		n, err := device.ReadWithTimeout(buf, timeout)
+		if errors.Is(err, hid.ErrTimeout) || (err == nil && n == 0) {
+			break
+		}
 		if err != nil {
 			return false, err
 		}
 		if state, valid := parseLinkReply(buf[:n], sequence); valid {
 			return state, nil
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	// A missing/invalid response is unknown, never evidence of a disconnected link.
-	return false, fmt.Errorf("receiver did not answer the headset link query")
+	return false, fmt.Errorf("receiver did not answer the headset link query within %s: %w", linkReplyTimeout, hid.ErrTimeout)
 }

@@ -4,10 +4,11 @@ Protocol: https://github.com/bbesli/Synapse-for-Linux/blob/main/docs/PROTOCOL.md
 Only VID/PID 1532:0565 is enabled; other Razer models use different protocols.
 """
 
+import math
 import time
 
-POLL_INTERVAL = 2.0
-REPLY_TIMEOUT = 1.0
+POLL_INTERVAL = 0.25
+REPLY_TIMEOUT = 0.15
 
 
 def supports_link_query(vendor_id, product_id):
@@ -44,15 +45,18 @@ def parse_link_reply(data, sequence):
     return bool(data[13])
 
 
-def query_link(device, sequence, clock=time.monotonic, sleep=time.sleep):
-    """Query a nonblocking HID handle. A timeout is unknown, never 'off'."""
+def query_link(device, sequence, clock=time.monotonic):
+    """Wait for a reply without busy polling. A timeout is unknown, never 'off'."""
     request = link_request(sequence)
     if device.write(request) != len(request):
         raise OSError("Incomplete headset status request")
     deadline = clock() + REPLY_TIMEOUT
-    while clock() < deadline:
-        state = parse_link_reply(device.read(64), sequence)
+    while (remaining := deadline - clock()) > 0:
+        # HIDAPI takes whole milliseconds; never turn a short wait into a spin.
+        data = device.read(64, max(1, math.ceil(remaining * 1000)))
+        if not data:
+            break
+        state = parse_link_reply(data, sequence)
         if state is not None:
             return state
-        sleep(0.01)
-    raise TimeoutError("Receiver did not answer the headset link query")
+    raise TimeoutError(f"Receiver did not answer the headset link query within {REPLY_TIMEOUT * 1000:g}ms")

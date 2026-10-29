@@ -48,8 +48,14 @@ def get_default_device_name():
         return None
 
 def switch_audio(nircmd_path, device_name):
-    subprocess.run([nircmd_path, "setdefaultsounddevice", device_name, "1"], check=True)
-    subprocess.run([nircmd_path, "setdefaultsounddevice", device_name, "2"], check=True)
+    for role in ("1", "2"):
+        subprocess.run(
+            [nircmd_path, "setdefaultsounddevice", device_name, role],
+            check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 def monitor_link(hid_device, cfg):
     previous_connection = None
@@ -71,8 +77,8 @@ def monitor_link(hid_device, cfg):
                 current = get_default_device_name()
                 if current and cfg["speaker_name"].lower() in current.lower():
                     switch_audio(cfg["nircmd_path"], cfg["headset_name"])
-        except (OSError, subprocess.CalledProcessError) as exc:
-            print(f"Headset status/switch failed: {exc}", file=sys.stderr)
+        except (OSError, subprocess.CalledProcessError):
+            pass
         sequence = (sequence + 1) & 0x1F
         time.sleep(max(0, POLL_INTERVAL - (time.monotonic() - started)))
 
@@ -103,7 +109,8 @@ def main():
             break
 
     if not target_path:
-        print("Headset receiver control channel not found", file=sys.stderr)
+        if args.status:
+            print("Headset receiver control channel not found", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -111,7 +118,8 @@ def main():
         hid_device.open_path(target_path)
         hid_device.set_nonblocking(1)
     except Exception as exc:
-        print(f"Cannot open headset receiver: {exc}", file=sys.stderr)
+        if args.status:
+            print(f"Cannot open headset receiver: {exc}", file=sys.stderr)
         sys.exit(1)
 
     current_state = "unknown"

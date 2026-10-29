@@ -160,22 +160,17 @@ func monitorLink(dev statusDevice, cfg Config) {
 	for {
 		started := time.Now()
 		connected, err := queryLink(dev, sequence)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Headset status query failed: %v\n", err)
-		} else {
+		if err == nil {
 			previous := previousConnection
 			previousConnection = connected
 			if !connected {
-				err = correctStartupState(cfg)
+				correctStartupState(cfg)
 			} else if haveBaseline && !previous {
-				err = setDefaultAudioDevice(cfg.HeadsetName)
+				setDefaultAudioDevice(cfg.HeadsetName)
 			} else if !haveBaseline {
-				err = switchAudioIfSelected(cfg.SpeakerName, cfg.HeadsetName)
+				switchAudioIfSelected(cfg.SpeakerName, cfg.HeadsetName)
 			}
 			haveBaseline = true
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Audio switch failed: %v\n", err)
-			}
 		}
 		sequence = (sequence + 1) & 0x1f
 		time.Sleep(linkPollInterval - time.Since(started))

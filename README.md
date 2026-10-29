@@ -5,7 +5,7 @@ Automatic Audio Toggler is an application that automatically switches your defau
 
 It monitors a USB HID (Human Interface Device) channel for a configured Vendor ID (VID) and Product ID (PID). A connected USB receiver alone does not mean the wireless headset is on.
 
-For the **Razer BlackShark V2 HyperSpeed wireless receiver (`1532:0565`)**, both implementations query the receiver's wireless link every two seconds. There are three switching rules:
+For the **Razer BlackShark V2 HyperSpeed wireless receiver (`1532:0565`)**, both implementations query the receiver's wireless link every 250 ms (four checks per second). A query waits at most 150 ms for its reply, returning as soon as the reply arrives. HID reads block while waiting instead of repeatedly checking for data, keeping idle CPU use low. Detection normally takes up to one polling interval plus the receiver's response and Windows audio-switching time. There are three switching rules:
 
 1. Headset turns on or reconnects: select the headphones.
 2. Manual output selections stick until the next power-on/reconnection, except that selecting an offline headset is corrected by rule 3.
@@ -13,13 +13,15 @@ For the **Razer BlackShark V2 HyperSpeed wireless receiver (`1532:0565`)**, both
 
 A missing or invalid reply leaves the output and last confirmed connection result unchanged; silence alone is not treated as power-off.
 
+The app runs silently in the background without routine logging or a command prompt window. Failed status checks are retried at the normal polling interval. The status check detects headset power-off and automatic sleep even while its USB receiver remains plugged in.
+
 The query uses report ID `0x02`, usage page `0xFF14` (65300), command `0x20`, and receiver domain `0x00`. Frame format and checksums are documented in the community [BlackShark V2 HyperSpeed protocol reference](https://github.com/bbesli/Synapse-for-Linux/blob/main/docs/PROTOCOL.md). Polling is enabled only for this VID/PID. Other headsets retain the original event-only detection, which can miss automatic shutdown. BlackShark V2 Pro and other Razer variants may use different protocols.
 
 On the first valid startup check, an online headset is selected if the monitor is currently selected; other outputs are preserved. An offline headset selected as output is corrected at startup and on every successful offline check. After startup, a manual monitor selection while the headset stays on is preserved until the next power-on/reconnection. A failed power-on switch is not replayed over a later manual selection; offline correction is retried while headphones remain selected. The receiver reports wireless connectivity, so going out of range and reconnecting have the same effect as power-off and power-on. A complete off/on cycle between polls cannot be detected.
 
-After changing the source, run the updated Python script or rebuild the executable; existing `.exe` files do not pick up source edits. For Go, build the whole package with `go build -o audio-toggler-go.exe .` inside its directory.
+After changing the source, run the updated Python script or rebuild the executable; existing `.exe` files do not pick up source edits. For Go, build the whole package with `go build -ldflags="-H windowsgui" -o audio-toggler-go.exe .` inside its directory. For Python, build with `python -m PyInstaller --onefile --noconsole --name audio-toggler-python main.py`; the executable is created in `dist/`. These flags prevent a command prompt window when launching either executable. Run the Python source with `pythonw main.py` for the same background behavior without packaging it.
 
-For Python, `python main.py --status` (or the rebuilt executable with `--status`) queries the link once without changing audio. Try it while the headset is on, then after it automatically turns off: it should print `connected` and `disconnected`, respectively. Query failures report `unknown` and exit with an error. Keep `audio-toggler-python.json` beside the executable; its `nircmd_path` must point to an existing NirCmd executable for audio switching.
+For Python, run `python main.py --status` in a terminal to query the link once without changing audio. Try it while the headset is on, then after it automatically turns off: it should print `connected` and `disconnected`, respectively. Query failures report `unknown` and exit with an error. The packaged background executable has no console for diagnostic output. Keep `audio-toggler-python.json` beside the executable; its `nircmd_path` must point to an existing NirCmd executable for audio switching.
 
 ## Implementations
 
